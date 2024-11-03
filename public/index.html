@@ -152,6 +152,7 @@
                     document.body.appendChild(audioElement);
                 };
 
+               //
                 socket.on('user-position',(positions) => {
                     const myPosition = {x:50, y:50};
                     const remotePosition = positions[event.stream[0].id];
@@ -161,6 +162,7 @@
                         adjustVolumeDistance(audioElement, distance);
                     };
                 })
+               // 
 
                 
                 peerConnection.onicecandidate = (event) => {
