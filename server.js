@@ -1,3 +1,4 @@
+var port = process.env.PORT || 8081;
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
@@ -70,6 +71,6 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(3000, () => {
+server.listen(port, () => {
     console.log('Server is listening on port 3000',server.address().address);
 });
