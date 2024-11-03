@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Web VR Classroom</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { margin: 0; }
+        a-scene { width: 100%; height: 100vh; }
+        #chat-bar {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: calc(100% - 40px);
+            max-width: 600px;
+            display: flex;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 5px;
+        }
+        #chat-input {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 5px 0 0 5px;
+            font-size: 16px;
+        }
+        #send-button {
+            padding: 10px;
+            border: none;
+            border-radius: 0 5px 5px 0;
+            background-color: #007BFF;
+            color: white;
+            cursor: pointer;
+        }
+        #messages {
+            position: fixed;
+            bottom: 100px;
+            left: 20px;
+            width: calc(100% - 40px);
+            max-width: 600px;
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 5px;
+            padding: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <a-scene id="scene">
+        <a-sky src="/img/orange.jpg" rotation="0 -130 0"></a-sky>
+        <a-text font="kelsonsans" value="Sample" width="6" position="-2.5 0.25 -1.5" rotation="0 15 0"></a-text>
+        <a-assets>
+            <img id="texture" src="/img/orange.jpg" />
+            <a-asset-item id="character" src="/img/FinalBaseMesh.obj"></a-asset-item>
+        </a-assets>
+        <a-box id="clickableBox" width="1" height="1" depth="1" position="0 0 0" rotation="45 45 45" scale="1 2.5 1" src="#texture"></a-box>
+        <a-camera id="camera" position="0 5.9 5" look-controls="pointerLockEnabled: true">
+            <a-cursor color="#FF0000"></a-cursor>
+            <a-entity id="local-avatar" obj-model="obj: #character;" position="0 -5.8 -5" scale="0.3 0.3 0.3" rotation="0 180 0"></a-entity>
+        </a-camera>
+    </a-scene>
+
+    <div id="messages"></div>
+    <div id="chat-bar">
+        <input type="text" id="chat-input" placeholder="Type your message..." />
+        <button id="send-button">Send</button>
+    </div>
+
+    <script>
+        const socket = io();
+        const peers = {};
+        const localStream = new MediaStream();
+        const localAvatar = document.getElementById('local-avatar');
+        const camera = document.getElementById('camera');
+        const speed = 0.1; // Movement speed
+        startVoiceChat();
+
+        // Handle socket connection
+        socket.on('connect', () => {
+            console.log('Connected to the server:', socket.id);
+        });
+
+        // Handle the current users list
+        socket.on('currentUsers', (users) => {
+            Object.keys(users).forEach(userId => {
+                if (userId !== socket.id) {
+                    createUserAvatar(userId, users[userId].position);
+                }
+            });
+        });
+
+        // Handle a new user joining
+        socket.on('userJoined', (data) => {
+            createUserAvatar(data.id, data.position);
+        });
+
+        // Handle a user disconnecting
+        socket.on('userDisconnected', (data) => {
+            const avatar = document.getElementById(data.id);
+            if (avatar) {
+                avatar.remove();
+            }
+        });
+
+        // Handle position updates for other users
+        socket.on('userMoved', (data) => {
+            const avatar = document.getElementById(data.id);
+            if (avatar) {
+                avatar.setAttribute('position', data.position);
+            }
+        });
+
+        // Handle chat messages
+        socket.on('chatMessage', (data) => {
+            const messagesDiv = document.getElementById('messages');
+            messagesDiv.innerHTML += `<div><strong>${data.userId}:</strong> ${data.message}</div>`;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight; // Scroll to the bottom
+        });
+
+
+
+        function startVoiceChat() {
+            const audioElement = document.createElement('audio');
+            audioElement.autoplay = true;
+            
+            navigator.mediaDevices?.getUserMedia({ audio: true }).then((stream) => {
+                const peerConnection = new RTCPeerConnection();
+                // Handle signaling messages for voice chat
+                socket.on('signal', async(data) => {
+                    console.log(data);
+                    
+                    if (data.type === 'offer') {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        socket.emit('signal', peerConnection.localDescription); //recent error
+                    } else if (data.type === 'answer') {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data));
+                    } else if (data.candidate) {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    }
+                });
+
+                 stream.getTracks().forEach((track) => {
+                    peerConnection.addTrack(track, stream); 
+                });
+                peerConnection.ontrack = (event) => {
+                    const remoteStream = event.streams[0]; 
+                    audioElement.srcObject = remoteStream;
+                    document.body.appendChild(audioElement);
+                };
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) { 
+                        socket.emit('signal', { candidate: event.candidate });
+                    }
+                };
+                peerConnection.createOffer().then((offer) => {
+                    peerConnection.setLocalDescription(offer); 
+                    socket.emit('signal', offer);
+                })
+            }).catch((err) => {
+                    console.error('Error accessing microphone:', err); 
+            });
+            document.querySelector('#camera').setAttribute('voice-chat', '');
+        }
+
+        // Create an avatar for a user
+        function createUserAvatar(userId, position) {
+            const avatar = document.createElement('a-entity');
+            avatar.setAttribute('id', userId);
+            avatar.setAttribute('obj-model', 'obj: #character;');
+            avatar.setAttribute('position', `${position.x} ${position.y} ${position.z}`);
+            avatar.setAttribute('scale', '0.3 0.3 0.3');
+            avatar.setAttribute('rotation', '0 180 0');
+            document.querySelector('a-scene').appendChild(avatar);
+        }
+
+        // Move the local avatar based on keyboard input
+        document.addEventListener('keydown', (event) => {
+            var position = camera.getAttribute('position');
+            socket.emit('userMoved', { id: socket.id, position: position });
+        });
+
+        // Handle chat input
+        const sendButton = document.getElementById('send-button');
+        const chatInput = document.getElementById('chat-input');
+        
+        sendButton.addEventListener('click', () => {
+            const message = chatInput.value;
+            if (message) {
+                socket.emit('chatMessage', { userId: socket.id, message: message });
+                chatInput.value = ''; // Clear the input field
+            }
+        });
+
+        chatInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendButton.click(); // Trigger click event on Enter key
+            }
+        });
+
+        // Handle box click event
+        const box = document.getElementById('clickableBox');
+        box.addEventListener('click', () => {
+            socket.emit('message', 'Box clicked!'); // Send a message when the box is clicked
+        });
+    </script>
+</body>
+</html>
