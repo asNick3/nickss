@@ -1,6 +1,6 @@
-var port = process.env.PORT || 8081;
 const fs = require('fs');
 const http = require('http');
+var port = process.env.PORT || 8081;
 const path = require('path');
 const socketIo = require('socket.io');
 
@@ -72,5 +72,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(port, () => {
-    console.log('Server is listening on port',server.address().port);
+    console.log('Server is listening on port', server.address().port);
 });
